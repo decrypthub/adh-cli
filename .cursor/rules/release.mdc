@@ -1,0 +1,16 @@
+---
+description: adh-cli 发版时同时更新 README、源码版本和 PyPI
+alwaysApply: true
+---
+
+# adh-cli 发版
+
+改用户能看到的行为或文案时，同时改 `README.md` 和 `README.en.md`。
+
+发版时这三处一起做，缺一不可：
+
+1. `pyproject.toml` 的 `version` 与 `src/adh/__init__.py` 的 `__version__` 改成同一个新版本。补丁 `+0.0.1`，新命令或可感知行为 `+0.1.0`。PyPI 不能覆盖已有版本。
+2. `python -m pytest` 通过后 `python -m build`，再 `twine check`，然后上传到 PyPI 项目 `android-decrypt-hub`。
+3. 把同一个提交推到 `decrypthub/adh-cli`。
+
+上传凭证只读本机 `~/.config/pypi/token`，不要写入仓库，也不要打印 token。
