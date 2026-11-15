@@ -10,6 +10,7 @@ from .config import clear_endpoints, config_path, load_saved_endpoints, remove_e
 from .endpoint import DEFAULT_PORT, HostEndpoint
 from .http_mcp import MCPHTTPClient, MCPTransportError, probe_endpoint
 from .stdio import TransparentProxy, configure_stdio_utf8, serve_stdio
+from .status import inventory
 
 PROBE_TIMEOUT = 3.0
 DEFAULT_CONNECT = f"127.0.0.1:{DEFAULT_PORT}"
@@ -35,6 +36,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     devices = sub.add_parser("devices", help="list saved Host daemons")
     devices.add_argument("--json", action="store_true")
+    devices.add_argument("--endpoint", action="append", default=[])
+
+    status = sub.add_parser("status", help="read-only service and target inventory for desktop Agents")
+    status.add_argument("--endpoint", action="append", default=[])
+    status.add_argument("--timeout", type=float, default=PROBE_TIMEOUT)
+    status.add_argument("--json", action="store_true")
+
+    tools = sub.add_parser("tools", help="list the Host's real MCP tools and argument schemas")
+    tools.add_argument("--endpoint")
+    tools.add_argument("--json", action="store_true")
 
     mcp = sub.add_parser("mcp", help="stdio MCP proxy to Host POST /mcp")
     mcp.add_argument("--endpoint", help="override saved address for this run")
@@ -54,7 +65,7 @@ def _resolve_saved(override: str | None) -> HostEndpoint:
     if len(saved) == 1:
         return saved[0]
     if not saved:
-        raise SystemExit("adh: no saved host; run `adh connect 127.0.0.1:8760`")
+        raise SystemExit("adh: no saved host; run `adh connect 127.0.0.1:8088`")
     raise SystemExit(
         "adh: multiple saved hosts; pass --endpoint <url>\n"
         + "\n".join(f"  {item.mcp_url}" for item in saved)
@@ -106,7 +117,7 @@ def _cmd_disconnect(args: argparse.Namespace) -> int:
 
 
 def _cmd_devices(args: argparse.Namespace) -> int:
-    saved = load_saved_endpoints()
+    saved = [HostEndpoint.from_url(value) for value in args.endpoint] if args.endpoint else load_saved_endpoints()
     rows = [probe_endpoint(item) for item in saved]
     if args.json:
         print(
@@ -127,13 +138,35 @@ def _cmd_devices(args: argparse.Namespace) -> int:
         )
         return 0
     if not rows:
-        print("adh: no saved hosts. `adh connect 127.0.0.1:8760`")
+        print("adh: no saved hosts. `adh connect 127.0.0.1:8088`")
         return 0
     for item in rows:
         status = item.properties.get("status") or "unknown"
         extra = item.properties.get("service") or ""
         print(f"{status:12} {item.base_url}  {extra}".rstrip())
     return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    endpoints = [HostEndpoint.from_url(value) for value in args.endpoint] if args.endpoint else load_saved_endpoints()
+    data = inventory(endpoints, timeout=args.timeout)
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_tools(args: argparse.Namespace) -> int:
+    endpoint = _resolve_saved(args.endpoint)
+    try:
+        response = MCPHTTPClient(endpoint, timeout=10.0).send({"jsonrpc": "2.0", "id": "adh-tools", "method": "tools/list", "params": {}})
+        result = response.get("result") if isinstance(response, dict) and "error" not in response else None
+        if not isinstance(result, dict) or not isinstance(result.get("tools"), list):
+            print("adh: invalid tools/list response", file=sys.stderr)
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    except MCPTransportError as exc:
+        print(f"adh: {exc}", file=sys.stderr)
+        return 1
 
 
 def _cmd_mcp(args: argparse.Namespace) -> int:
@@ -174,7 +207,8 @@ def _cmd_call(args: argparse.Namespace) -> int:
     else:
         result = response.get("result") if isinstance(response, dict) else response
         print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    result = response.get("result") if isinstance(response, dict) else None
+    return 1 if not isinstance(result, dict) or result.get("isError") else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -188,6 +222,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "connect": _cmd_connect,
         "disconnect": _cmd_disconnect,
         "devices": _cmd_devices,
+        "status": _cmd_status,
+        "tools": _cmd_tools,
         "mcp": _cmd_mcp,
         "call": _cmd_call,
     }

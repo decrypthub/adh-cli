@@ -76,5 +76,6 @@ def probe_endpoint(endpoint: HostEndpoint, *, timeout: float = 3.0) -> HostEndpo
             "version": health.get("version"),
             "agents": health.get("agents"),
             "mcp_tools": health.get("mcpTools"),
+            "apps": health.get("apps", []),
         }
     )

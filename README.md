@@ -12,7 +12,7 @@ adh connect 127.0.0.1:8088
 adh devices
 ```
 
-源码在 [decrypthub/adh-cli](https://github.com/decrypthub/adh-cli)，PyPI 包名是 [android-decrypt-hub](https://pypi.org/project/android-decrypt-hub/)。产品仓库是 [AndroidDecryptHub](https://github.com/decrypthub/AndroidDecryptHub)。当前版本 **0.1.2**。
+源码在 [decrypthub/adh-cli](https://github.com/decrypthub/adh-cli)，PyPI 包名是 [android-decrypt-hub](https://pypi.org/project/android-decrypt-hub/)。产品仓库是 [AndroidDecryptHub](https://github.com/decrypthub/AndroidDecryptHub)。当前版本 **0.2.0**。
 
 Host ADH Daemon 没有身份认证，只在可信局域网里使用，不要暴露到公网。不要把 HTTP `/mcp` 直接配进 MCP 客户端。
 
@@ -31,7 +31,7 @@ pipx upgrade android-decrypt-hub
 
 ## 连接
 
-先在电脑上启动 Host ADH Daemon，再保存它的地址。当前 Daemon 默认 HTTP 端口是 `8088`。这个 CLI 在省略端口时仍使用 `8760`，所以请带上实际端口：
+先在电脑上启动 Host ADH Daemon，再保存它的地址。Daemon 和 CLI 的默认 HTTP 端口均为 `8088`。已保存或显式指定的其他端口继续有效：
 
 ```bash
 adh connect 127.0.0.1:8088
@@ -96,7 +96,7 @@ adh call <tool_name> --endpoint http://127.0.0.1:8088
 
 | 命令 | 作用 |
 | --- | --- |
-| `adh connect [地址]` | 探测并保存 Host ADH Daemon。默认 `127.0.0.1:8760` |
+| `adh connect [地址]` | 探测并保存 Host ADH Daemon。默认 `127.0.0.1:8088` |
 | `adh disconnect [地址]` | 移除一个已保存地址；`--all` 清空 |
 | `adh devices` | 列出已保存地址，并显示在线状态 |
 | `adh mcp` | 把已保存 Daemon 的 `POST /mcp` 转成 stdio MCP |
@@ -139,3 +139,14 @@ python -m twine upload --repository pypi dist/android_decrypt_hub-<version>*
 在 DecryptHub 的「插件」入口安装官方网关，配置设备服务地址后即可启用 MCP。安装包只包含电脑端 CLI 和标准库启动器，要求 Python 3.10+；设备插件及 Host 服务仍按各自项目说明准备。
 
 维护者构建组件：`python scripts/build_component.py`。输出 `dist/adh-<version>-any.zip`，包含 API 1 清单、源代码版本及逐文件 SHA-256，可独立通过 GitHub Releases 更新。`decrypthub-v<version>` 标签用于桌面组件分发，与 PyPI 发版独立。
+
+## 桌面 Agent 与状态查询
+
+```bash
+adh status --json --endpoint http://127.0.0.1:8088
+adh tools --json --endpoint http://127.0.0.1:8088
+```
+
+`status --json` 返回带 `schemaVersion: 1` 和 `checkedAt` 的只读快照，分别列出 `connections` 的服务在线事实及 `targets` 的应用/PID/目标标识；离线地址不会冒充在线目标。状态查询不保存地址、不注入、不启停应用，也不自动升级 CLI。`tools --json` 返回当前目标的真实 MCP 工具说明和参数 schema。先查询状态，再选择本次返回的唯一目标，最后通过现有 `call` 或持久 MCP 连接执行分析；多个候选必须让用户选择。
+
+ADH 省略端口时默认连接 8088；`devices --endpoint` 支持临时探测，`call` 收到 MCP 错误或 `isError` 时返回非零退出码。

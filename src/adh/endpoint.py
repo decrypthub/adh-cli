@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-DEFAULT_PORT = 8760
+DEFAULT_PORT = 8088
 DEFAULT_MCP_PATH = "/mcp"
 
 
