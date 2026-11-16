@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from collections.abc import Sequence
 
 from . import __version__
@@ -55,6 +56,42 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--arguments", default="{}", metavar="JSON")
     call.add_argument("--endpoint")
     call.add_argument("--json", action="store_true")
+    call.add_argument("--operation", help="explicit operation control metadata as JSON")
+    call.add_argument("--operator", action="store_true", help="use ADH_OPERATOR_TOKEN explicitly")
+
+    run = sub.add_parser("run", help="observe current control once and submit a durable tool operation")
+    run.add_argument("tool_name")
+    run.add_argument("--arguments", default="{}")
+    run.add_argument("--task-id")
+    run.add_argument("--idempotency-key")
+    run.add_argument("--timeout-ms", type=int, default=120000)
+    run.add_argument("--endpoint")
+    run.add_argument("--operator", action="store_true")
+    run.add_argument("--json", action="store_true")
+
+    tasks = sub.add_parser("tasks", help="query/control persistent Host tasks and operations")
+    tasks.add_argument("action", choices=["create", "list", "get", "pause", "resume", "cancel", "complete"])
+    tasks.add_argument("id", nargs="?")
+    tasks.add_argument("--task-id")
+    tasks.add_argument("--title", default="analysis")
+    tasks.add_argument("--include-result", action="store_true")
+    tasks.add_argument("--limit", type=int, default=50)
+    tasks.add_argument("--offset", type=int, default=0)
+    tasks.add_argument("--endpoint")
+    tasks.add_argument("--operator", action="store_true")
+    tasks.add_argument("--json", action="store_true")
+
+    control = sub.add_parser("control", help="read state versions or explicitly transfer operator control")
+    control.add_argument("action", choices=["snapshot", "takeover", "release", "resolve", "hold"])
+    control.add_argument("--session")
+    control.add_argument("--resource")
+    control.add_argument("--revision", type=int)
+    control.add_argument("--epoch", type=int)
+    control.add_argument("--host-epoch", type=int)
+    control.add_argument("--acknowledge", action="store_true")
+    control.add_argument("--endpoint")
+    control.add_argument("--operator", action="store_true")
+    control.add_argument("--json", action="store_true")
     return parser
 
 
@@ -189,8 +226,17 @@ def _cmd_call(args: argparse.Namespace) -> int:
     if not isinstance(arguments, dict):
         print("adh: --arguments must be a JSON object", file=sys.stderr)
         return 2
-    client = MCPHTTPClient(endpoint)
+    if args.operation:
+        try:
+            metadata = json.loads(args.operation)
+            if not isinstance(metadata, dict) or "_operation" in arguments:
+                raise ValueError("use one operation metadata object")
+            arguments["_operation"] = metadata
+        except (ValueError, json.JSONDecodeError) as exc:
+            print(f"adh: invalid --operation: {exc}", file=sys.stderr)
+            return 2
     try:
+        client = MCPHTTPClient(endpoint, operator=True) if args.operator else MCPHTTPClient(endpoint)
         response = client.send(
             {
                 "jsonrpc": "2.0",
@@ -211,6 +257,76 @@ def _cmd_call(args: argparse.Namespace) -> int:
     return 1 if not isinstance(result, dict) or result.get("isError") else 0
 
 
+def _operation_rpc(client: MCPHTTPClient, arguments: dict) -> dict:
+    response = client.send({"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": "tools/call",
+                            "params": {"name": "operations", "arguments": arguments}})
+    if not isinstance(response, dict) or "error" in response:
+        raise MCPTransportError("Host rejected operation management request")
+    result = response.get("result", {})
+    try:
+        value = json.loads(result["content"][0]["text"])
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        raise MCPTransportError("Host does not support P1 operation management") from exc
+    if not isinstance(value, dict):
+        raise MCPTransportError("invalid operation response")
+    return value
+
+
+def _cmd_operations(args: argparse.Namespace) -> int:
+    try:
+        endpoint = _resolve_saved(args.endpoint)
+        client = MCPHTTPClient(endpoint, operator=True) if args.operator else MCPHTTPClient(endpoint)
+        if args.command == "run":
+            values = json.loads(args.arguments)
+            if not isinstance(values, dict) or "_operation" in values:
+                raise ValueError("--arguments must be an object without _operation; use call for explicit versions")
+            snapshot = _operation_rpc(client, {"action": "snapshot", "tool": args.tool_name, "arguments": values})
+            if snapshot.get("ok") is False:
+                value = snapshot
+            else:
+                metadata = {"expectedRevision": snapshot["revision"], "controlEpoch": snapshot["epoch"],
+                            "hostEpoch": snapshot["hostEpoch"], "idempotencyKey": args.idempotency_key or uuid.uuid4().hex,
+                            "timeoutMs": args.timeout_ms}
+                if args.task_id:
+                    metadata["taskId"] = args.task_id
+                value = _operation_rpc(client, {"action": "submit", "tool": args.tool_name, "arguments": values, "_operation": metadata})
+        elif args.command == "control":
+            target = {key: val for key, val in {"session": args.session, "resource": args.resource}.items() if val}
+            values = {"action": args.action, **target}
+            if args.action != "snapshot":
+                numbers = [args.revision, args.epoch, args.host_epoch]
+                if any(n is not None for n in numbers) and not all(n is not None for n in numbers):
+                    raise ValueError("supply --revision, --epoch and --host-epoch together")
+                if args.acknowledge and args.action != "resolve":
+                    raise ValueError("--acknowledge only applies to resolve")
+                snapshot = _operation_rpc(client, {"action": "snapshot", **target}) if numbers[0] is None else None
+                if snapshot and snapshot.get("ok") is False:
+                    print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+                    return 1
+                values["_operation"] = {"expectedRevision": snapshot["revision"] if snapshot else args.revision,
+                                         "controlEpoch": snapshot["epoch"] if snapshot else args.epoch,
+                                         "hostEpoch": snapshot["hostEpoch"] if snapshot else args.host_epoch}
+                values["acknowledge"] = args.acknowledge
+            value = _operation_rpc(client, values)
+        else:
+            values = {"action": args.action, "limit": args.limit, "offset":args.offset, "includeResult": args.include_result}
+            if args.action == "create":
+                values["title"] = args.title
+            if args.task_id:
+                values["taskId"] = args.task_id
+            elif args.id:
+                values["taskId" if args.action in ["pause", "resume", "complete"] else "id"] = args.id
+            if args.action not in ["create", "list"] and not (args.id or args.task_id):
+                raise ValueError("a task/operation id is required")
+            value = _operation_rpc(client, values)
+        print(json.dumps(value, ensure_ascii=False, indent=2 if args.json else None))
+        # Queued/running acknowledges acceptance, never claims analysis succeeded.
+        return 0 if value.get("ok") is not False else 1
+    except (MCPTransportError, ValueError, KeyError) as exc:
+        print(f"adh: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     configure_stdio_utf8()
     parser = build_parser()
@@ -226,5 +342,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "tools": _cmd_tools,
         "mcp": _cmd_mcp,
         "call": _cmd_call,
+        "run": _cmd_operations,
+        "tasks": _cmd_operations,
+        "control": _cmd_operations,
     }
     return commands[args.command](args)

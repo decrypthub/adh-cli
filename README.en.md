@@ -14,7 +14,27 @@ adh devices
 
 Source: [decrypthub/adh-cli](https://github.com/decrypthub/adh-cli). PyPI project: [android-decrypt-hub](https://pypi.org/project/android-decrypt-hub/). Product repository: [AndroidDecryptHub](https://github.com/decrypthub/AndroidDecryptHub). Current version: **0.2.0**.
 
-The Host ADH Daemon has no authentication. Use it only on a trusted LAN, and do not point an MCP client at the HTTP `/mcp` endpoint directly.
+Full connection authentication and TLS are not implemented. P1 operator credentials coordinate human control only. Use the Host on a trusted LAN, and do not point an MCP client at the HTTP `/mcp` endpoint directly.
+
+## P1 durable operations and control (unreleased source)
+
+This branch pairs with the P1 AndroidDecryptHub Host. It has not been published to PyPI and does not upgrade or restart an existing Host. P1 writes require expectedRevision/controlEpoch/hostEpoch in `_operation`; unversioned writes return CONTROL_REQUIRED. Ordinary reads and stdio passthrough remain compatible. See the product repository's `docs/P1_OPERATIONS.md` for the shared execution contract.
+
+```bash
+adh tasks create --title "Request analysis" --endpoint 127.0.0.1:18088 --json
+adh run TOOL --arguments JSON --task-id TASK_ID --idempotency-key INTENT_ID --endpoint 127.0.0.1:18088 --json
+adh tasks get OPERATION_ID --include-result --endpoint 127.0.0.1:18088 --json
+adh tasks cancel OPERATION_ID --endpoint 127.0.0.1:18088
+adh tasks cancel --task-id TASK_ID --endpoint 127.0.0.1:18088
+adh tasks list --limit 50 --offset 0 --endpoint 127.0.0.1:18088
+adh control snapshot --session SESSION --endpoint 127.0.0.1:18088
+```
+
+`run` observes once and submits asynchronously. Queued/running means accepted; query `tasks get` for the outcome. Use `adh call TOOL --arguments JSON --operation METADATA_JSON` to preserve previously observed versions. On a conflict, observe and re-plan; the CLI never silently replaces stale versions or retries. Keep the same idempotency key for the same intent.
+
+An operator explicitly sets ADH_OPERATOR_TOKEN in their terminal and uses `adh control takeover|release --session SESSION --operator`. Supply all of `--revision N --epoch N --host-epoch N` to use an existing observation. Actions are snapshot/takeover/release/resolve/hold. Use `resolve --acknowledge --operator` only after checking unknown effects; it does not stop or roll back the target.
+
+CLI and stdio AI defaults ignore an inherited operator key; only explicit `--operator` sends it. Tasks support pause/resume/complete; cancelling one operation leaves its named task active. In-flight cancellation can still finish successfully: cancel_requested or succeeded with cancelRequested preserves that fact. Post-dispatch timeout/disconnect is unknown, with late evidence and no automatic replay. An HTTP timeout does not prove Host/target execution stopped; query the durable id/key before taking further action.
 
 ## Install
 
