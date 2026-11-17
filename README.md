@@ -170,3 +170,8 @@ adh tools --json --endpoint http://127.0.0.1:8088
 `status --json` 返回带 `schemaVersion: 1` 和 `checkedAt` 的只读快照，分别列出 `connections` 的服务在线事实及 `targets` 的应用/PID/目标标识；离线地址不会冒充在线目标。状态查询不保存地址、不注入、不启停应用，也不自动升级 CLI。`tools --json` 返回当前目标的真实 MCP 工具说明和参数 schema。先查询状态，再选择本次返回的唯一目标，最后通过现有 `call` 或持久 MCP 连接执行分析；多个候选必须让用户选择。
 
 ADH 省略端口时默认连接 8088；`devices --endpoint` 支持临时探测，`call` 收到 MCP 错误或 `isError` 时返回非零退出码。
+
+## 开发验证
+
+在源码目录运行 `python -m pytest`。测试配置优先导入本仓 `src`，避免误测电脑上已安装的旧版 `adh`。
+发布前另运行 `python -m build` 与 `python -m twine check dist/*`，并在隔离环境验证构建后的 wheel。

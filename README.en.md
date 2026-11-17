@@ -124,3 +124,8 @@ adh tools --json --endpoint http://127.0.0.1:8088
 `status --json` returns a read-only snapshot with `schemaVersion: 1`, `checkedAt`, service observations in `connections`, and current app/PID identifiers in `targets`. An offline address is never reported as an online target. Status does not save connections, inject, restart apps, or upgrade the CLI. `tools --json` reads the real MCP tool descriptions and argument schemas. Refresh status, select a unique returned target, then use `call` or the persistent MCP connection; ask the user when multiple targets match.
 
 ADH defaults to port 8088. `devices --endpoint` inspects a temporary address. `call` exits nonzero for an MCP error or `isError` result.
+
+## Development checks
+
+Run `python -m pytest` from the source checkout. The test configuration imports this repository's `src` first, avoiding an older globally installed `adh`.
+Before publishing, also run `python -m build` and `python -m twine check dist/*`, then verify the built wheel in an isolated environment.
