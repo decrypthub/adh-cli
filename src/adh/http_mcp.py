@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -16,10 +18,14 @@ class MCPTransportError(RuntimeError):
 
 
 class MCPHTTPClient:
-    def __init__(self, endpoint: HostEndpoint, *, timeout: float = 120.0) -> None:
+    def __init__(self, endpoint: HostEndpoint, *, timeout: float = 120.0, operator: bool = False) -> None:
         self.endpoint = endpoint
         self.timeout = timeout
         self.session_id: str | None = None
+        self.client_id = uuid.uuid4().hex
+        self.operator_token = os.environ.get("ADH_OPERATOR_TOKEN") if operator else None
+        if operator and not self.operator_token:
+            raise MCPTransportError("--operator requires ADH_OPERATOR_TOKEN in this process environment")
 
     def update_endpoint(self, endpoint: HostEndpoint) -> None:
         if endpoint.mcp_url != self.endpoint.mcp_url:
@@ -32,10 +38,13 @@ class MCPHTTPClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": f"adh/{__version__}",
+            "X-Adh-Client-Id": self.client_id,
         }
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         request = Request(self.endpoint.mcp_url, data=body, headers=headers, method="POST")
+        if self.operator_token:
+            request.add_unredirected_header("X-Adh-Operator-Key", self.operator_token)
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 session_id = response.headers.get("Mcp-Session-Id")
@@ -51,7 +60,10 @@ class MCPHTTPClient:
                 f"MCP HTTP {exc.code} ({self.endpoint.mcp_url}): {detail or exc.reason}"
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise MCPTransportError(f"cannot connect to {self.endpoint.mcp_url}: {exc}") from exc
+            raise MCPTransportError(
+                f"MCP HTTP exchange failed ({self.endpoint.mcp_url}): {exc}; "
+                "Host/target execution may continue; inspect durable operations before retrying writes"
+            ) from exc
         except json.JSONDecodeError as exc:
             raise MCPTransportError(f"host returned invalid JSON: {exc}") from exc
 
@@ -76,5 +88,6 @@ def probe_endpoint(endpoint: HostEndpoint, *, timeout: float = 3.0) -> HostEndpo
             "version": health.get("version"),
             "agents": health.get("agents"),
             "mcp_tools": health.get("mcpTools"),
+            "apps": health.get("apps", []),
         }
     )

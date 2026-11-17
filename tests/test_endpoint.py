@@ -8,9 +8,9 @@ from adh.endpoint import HostEndpoint
 class EndpointTests(unittest.TestCase):
     def test_default_port_and_mcp_path(self) -> None:
         endpoint = HostEndpoint.from_url("192.168.1.8")
-        self.assertEqual(endpoint.port, 8760)
-        self.assertEqual(endpoint.mcp_url, "http://192.168.1.8:8760/mcp")
-        self.assertEqual(endpoint.panel_url, "http://192.168.1.8:8760/")
+        self.assertEqual(endpoint.port, 8088)
+        self.assertEqual(endpoint.mcp_url, "http://192.168.1.8:8088/mcp")
+        self.assertEqual(endpoint.panel_url, "http://192.168.1.8:8088/")
 
     def test_strips_mcp_suffix(self) -> None:
         endpoint = HostEndpoint.from_url("http://127.0.0.1:8760/mcp")

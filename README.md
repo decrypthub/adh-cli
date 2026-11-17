@@ -12,9 +12,29 @@ adh connect 127.0.0.1:8088
 adh devices
 ```
 
-源码在 [decrypthub/adh-cli](https://github.com/decrypthub/adh-cli)，PyPI 包名是 [android-decrypt-hub](https://pypi.org/project/android-decrypt-hub/)。产品仓库是 [AndroidDecryptHub](https://github.com/decrypthub/AndroidDecryptHub)。当前版本 **0.1.2**。
+源码在 [decrypthub/adh-cli](https://github.com/decrypthub/adh-cli)，PyPI 包名是 [android-decrypt-hub](https://pypi.org/project/android-decrypt-hub/)。产品仓库是 [AndroidDecryptHub](https://github.com/decrypthub/AndroidDecryptHub)。当前版本 **0.2.0**。
 
-Host ADH Daemon 没有身份认证，只在可信局域网里使用，不要暴露到公网。不要把 HTTP `/mcp` 直接配进 MCP 客户端。
+Host ADH Daemon 的完整连接认证与 TLS 尚未实现，P1 的 operator 凭据只协调人类控制权。只在可信局域网里使用，不要暴露到公网。不要把 HTTP `/mcp` 直接配进 MCP 客户端。
+
+## P1 持久任务与接管（源码待发布）
+
+本分支与 AndroidDecryptHub 的 P1 Host 配套，尚未发布到 PyPI；不会升级或重启已有 Host。新 Host 的写入要求 `_operation` 中的 expectedRevision/controlEpoch/hostEpoch，旧无版本写调用会返回 CONTROL_REQUIRED。普通读取与 stdio 透传仍兼容；AI 需要明确观察版本后提交。统一执行层与状态定义见产品仓库 `docs/P1_OPERATIONS.md`。
+
+```bash
+adh tasks create --title "请求分析" --endpoint 127.0.0.1:18088 --json
+adh run TOOL --arguments JSON --task-id TASK_ID --idempotency-key INTENT_ID --endpoint 127.0.0.1:18088 --json
+adh tasks get OPERATION_ID --include-result --endpoint 127.0.0.1:18088 --json
+adh tasks cancel OPERATION_ID --endpoint 127.0.0.1:18088
+adh tasks cancel --task-id TASK_ID --endpoint 127.0.0.1:18088
+adh tasks list --limit 50 --offset 0 --endpoint 127.0.0.1:18088
+adh control snapshot --session SESSION --endpoint 127.0.0.1:18088
+```
+
+`run` 观察一次状态并异步提交，返回 queued/running 只代表已接受；通过 `tasks get` 检查真实结果。AI 已有旧版本时用 `adh call TOOL --arguments JSON --operation METADATA_JSON` 保留原版本；发生冲突必须重新观察并规划，CLI 不替换版本重试。同一意图保持同一个 idempotency key。
+
+人类在当前终端显式配置 ADH_OPERATOR_TOKEN 后，用 `adh control takeover|release --session SESSION --operator` 接管/释放；也可加 `--revision N --epoch N --host-epoch N` 使用已观察版本。完整 action 包括 snapshot/takeover/release/resolve/hold。`resolve --acknowledge --operator` 仅在检查未知副作用后使用，不代表停止或回滚目标。
+
+默认 CLI 和 stdio AI 代理忽略继承的 operator 密钥；只有显式 `--operator` 才发送。任务可 pause/resume/complete；cancel 单个 operation 不取消整项 task。派发后取消仍可能执行成功，反馈 cancel_requested 或 succeeded + cancelRequested；派发后超时/断连为 unknown，保留晚到证据，不自动重放。HTTP 传输超时本身不能证明 Host 或目标已停止，使用持久 id/key 查询；不要直接重发旧写入。
 
 ## 安装
 
@@ -31,7 +51,7 @@ pipx upgrade android-decrypt-hub
 
 ## 连接
 
-先在电脑上启动 Host ADH Daemon，再保存它的地址。当前 Daemon 默认 HTTP 端口是 `8088`。这个 CLI 在省略端口时仍使用 `8760`，所以请带上实际端口：
+先在电脑上启动 Host ADH Daemon，再保存它的地址。Daemon 和 CLI 的默认 HTTP 端口均为 `8088`。已保存或显式指定的其他端口继续有效：
 
 ```bash
 adh connect 127.0.0.1:8088
@@ -96,7 +116,7 @@ adh call <tool_name> --endpoint http://127.0.0.1:8088
 
 | 命令 | 作用 |
 | --- | --- |
-| `adh connect [地址]` | 探测并保存 Host ADH Daemon。默认 `127.0.0.1:8760` |
+| `adh connect [地址]` | 探测并保存 Host ADH Daemon。默认 `127.0.0.1:8088` |
 | `adh disconnect [地址]` | 移除一个已保存地址；`--all` 清空 |
 | `adh devices` | 列出已保存地址，并显示在线状态 |
 | `adh mcp` | 把已保存 Daemon 的 `POST /mcp` 转成 stdio MCP |
@@ -139,3 +159,19 @@ python -m twine upload --repository pypi dist/android_decrypt_hub-<version>*
 在 DecryptHub 的「插件」入口安装官方网关，配置设备服务地址后即可启用 MCP。安装包只包含电脑端 CLI 和标准库启动器，要求 Python 3.10+；设备插件及 Host 服务仍按各自项目说明准备。
 
 维护者构建组件：`python scripts/build_component.py`。输出 `dist/adh-<version>-any.zip`，包含 API 1 清单、源代码版本及逐文件 SHA-256，可独立通过 GitHub Releases 更新。`decrypthub-v<version>` 标签用于桌面组件分发，与 PyPI 发版独立。
+
+## 桌面 Agent 与状态查询
+
+```bash
+adh status --json --endpoint http://127.0.0.1:8088
+adh tools --json --endpoint http://127.0.0.1:8088
+```
+
+`status --json` 返回带 `schemaVersion: 1` 和 `checkedAt` 的只读快照，分别列出 `connections` 的服务在线事实及 `targets` 的应用/PID/目标标识；离线地址不会冒充在线目标。状态查询不保存地址、不注入、不启停应用，也不自动升级 CLI。`tools --json` 返回当前目标的真实 MCP 工具说明和参数 schema。先查询状态，再选择本次返回的唯一目标，最后通过现有 `call` 或持久 MCP 连接执行分析；多个候选必须让用户选择。
+
+ADH 省略端口时默认连接 8088；`devices --endpoint` 支持临时探测，`call` 收到 MCP 错误或 `isError` 时返回非零退出码。
+
+## 开发验证
+
+在源码目录运行 `python -m pytest`。测试配置优先导入本仓 `src`，避免误测电脑上已安装的旧版 `adh`。
+发布前另运行 `python -m build` 与 `python -m twine check dist/*`，并在隔离环境验证构建后的 wheel。
