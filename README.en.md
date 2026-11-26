@@ -123,6 +123,8 @@ adh tools --json --endpoint http://127.0.0.1:8088
 
 `status --json` returns a read-only snapshot with `schemaVersion: 1`, `checkedAt`, service observations in `connections`, and current app/PID identifiers in `targets`. An offline address is never reported as an online target. Status does not save connections, inject, restart apps, or upgrade the CLI. `tools --json` reads the real MCP tool descriptions and argument schemas. Refresh status, select a unique returned target, then use `call` or the persistent MCP connection; ask the user when multiple targets match.
 
+`configuration.source` is `explicit` or `saved`. An explicit `--endpoint` checks only the given addresses and ignores saved ones. The desktop can receive limited verified usage receipts from the same local stdio MCP subprocess. They are not tool output and do not change permissions, target selection, or call logic; without such a receipt, AI usage cannot be assumed.
+
 ADH defaults to port 8088. `devices --endpoint` inspects a temporary address. `call` exits nonzero for an MCP error or `isError` result.
 
 ## Development checks

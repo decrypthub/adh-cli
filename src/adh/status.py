@@ -10,7 +10,7 @@ from .endpoint import HostEndpoint
 from .http_mcp import probe_endpoint
 
 
-def inventory(endpoints: list[HostEndpoint], *, timeout: float = 3.0) -> dict[str, Any]:
+def inventory(endpoints: list[HostEndpoint], *, timeout: float = 3.0, source: str = "explicit") -> dict[str, Any]:
     unique = list({endpoint.key: endpoint for endpoint in endpoints}.values())
     with ThreadPoolExecutor(max_workers=max(1, min(8, len(unique)))) as pool:
         checked = list(pool.map(lambda endpoint: probe_endpoint(endpoint, timeout=timeout), unique))
@@ -29,4 +29,5 @@ def inventory(endpoints: list[HostEndpoint], *, timeout: float = 3.0) -> dict[st
                             "package": app.get("package"), "pid": app.get("pid"),
                             "endpoint": endpoint.mcp_url, "online": online and app.get("online") is True})
     return {"schemaVersion": 1, "component": "adh", "version": __version__,
-            "checkedAt": datetime.now(timezone.utc).isoformat(), "connections": connections, "targets": targets}
+            "checkedAt": datetime.now(timezone.utc).isoformat(), "connections": connections, "targets": targets,
+            "configuration": {"source": source, "endpoints": [endpoint.mcp_url for endpoint in checked]}}

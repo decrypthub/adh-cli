@@ -186,7 +186,7 @@ def _cmd_devices(args: argparse.Namespace) -> int:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     endpoints = [HostEndpoint.from_url(value) for value in args.endpoint] if args.endpoint else load_saved_endpoints()
-    data = inventory(endpoints, timeout=args.timeout)
+    data = inventory(endpoints, timeout=args.timeout, source="explicit" if args.endpoint else "saved")
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return 0
 

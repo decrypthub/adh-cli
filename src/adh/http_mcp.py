@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from . import __version__
+from .observation import observe_result
 from .endpoint import HostEndpoint
 
 
@@ -53,7 +54,8 @@ class MCPHTTPClient:
                 payload = response.read()
                 if response.status in (202, 204) or not payload:
                     return None
-                return json.loads(payload)
+                value = json.loads(payload)
+                return observe_result(message, value, request.full_url, response.geturl())
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise MCPTransportError(
