@@ -169,6 +169,8 @@ adh tools --json --endpoint http://127.0.0.1:8088
 
 `status --json` 返回带 `schemaVersion: 1` 和 `checkedAt` 的只读快照，分别列出 `connections` 的服务在线事实及 `targets` 的应用/PID/目标标识；离线地址不会冒充在线目标。状态查询不保存地址、不注入、不启停应用，也不自动升级 CLI。`tools --json` 返回当前目标的真实 MCP 工具说明和参数 schema。先查询状态，再选择本次返回的唯一目标，最后通过现有 `call` 或持久 MCP 连接执行分析；多个候选必须让用户选择。
 
+`configuration.source` 为 `explicit` 或 `saved`。显式 `--endpoint` 只检查传入地址，忽略已保存的地址。 桌面端可从同一个本机 stdio MCP 子进程收到有限的已验证使用回报。它不是工具输出，不改变权限、目标选择或调用逻辑；无相应回报时不能认定 AI 已使用。
+
 ADH 省略端口时默认连接 8088；`devices --endpoint` 支持临时探测，`call` 收到 MCP 错误或 `isError` 时返回非零退出码。
 
 ## 开发验证
